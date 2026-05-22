@@ -38,11 +38,14 @@ function parseJSON(text, label = 'response') {
 // ─── Pipeline utilities ───────────────────────────────────────────────────────
 
 async function searchPubMed(query, sinceDate) {
-  // Build date filter from policy revision year
+  // Build date filter — extract 4-digit year from any date format the AI returns
+  // e.g. "2014-02-18", "February 18, 2014", "2014" all yield "2014"
   let dateFilter = ''
   if (sinceDate) {
-    const year = String(sinceDate).substring(0, 4)
-    dateFilter = `+AND+("${year}"[Date - Publication] : "3000"[Date - Publication])`
+    const yearMatch = String(sinceDate).match(/\b(19|20)\d{2}\b/)
+    if (yearMatch) {
+      dateFilter = `+AND+("${yearMatch[0]}"[Date - Publication] : "3000"[Date - Publication])`
+    }
   }
   const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}${dateFilter}&retmax=20&retmode=json&sort=date`
   const searchRes = await fetch(searchUrl)

@@ -335,6 +335,43 @@
   margin: 8px 0 0;
 }
 
+.error-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.error-demo-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.error-demo-btn:hover {
+  opacity: 0.88;
+}
+
+.error-clear-btn {
+  background: none;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  padding: 9px 16px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.error-clear-btn:hover {
+  background: #fef2f2;
+}
+
 /* ─── Report Card ────────────────────────────────────────────────────────── */
 
 .done-view {

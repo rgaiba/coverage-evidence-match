@@ -527,9 +527,30 @@ export default function App() {
             </form>
             <div className="error-box">
               <strong>Error:</strong> {error}
-              {error.toLowerCase().includes('api key') && (
-                <p>Click "API Key" in the header to enter your Anthropic API key.</p>
-              )}
+              <div className="error-actions">
+                <button
+                  className="error-demo-btn"
+                  onClick={() => {
+                    sessionStorage.removeItem('cem_api_key')
+                    runPipeline(query, '')
+                  }}
+                >
+                  Run demo instead →
+                </button>
+                {sessionStorage.getItem('cem_api_key') && (
+                  <button
+                    className="error-clear-btn"
+                    onClick={() => {
+                      sessionStorage.removeItem('cem_api_key')
+                      setPendingQuery(query)
+                      setShowKeyModal(true)
+                      setPhase('idle')
+                    }}
+                  >
+                    Replace API key
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

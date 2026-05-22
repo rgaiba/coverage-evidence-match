@@ -12,6 +12,29 @@ function getProxyUrl() {
   return URL_PROXY || sessionStorage.getItem('cem_proxy_url') || DEFAULT_PROXY
 }
 
+// ─── JSON repair helper ───────────────────────────────────────────────────────
+// Handles truncated model responses by closing unclosed brackets before parsing.
+
+function parseJSON(text, label = 'response') {
+  const start = text.indexOf('{')
+  if (start === -1) throw new Error(`No JSON found in ${label}`)
+  let json = text.slice(start)
+
+  // First try: direct parse
+  try { return JSON.parse(json) } catch (_) {}
+
+  // Second try: strip trailing incomplete token + rebalance brackets
+  // Remove any dangling comma or partial string at the end
+  json = json.replace(/,\s*$/, '').replace(/,\s*[\]}]$/, m => m.slice(1))
+  const unclosedArrays  = (json.match(/\[/g) || []).length - (json.match(/\]/g) || []).length
+  const unclosedObjects = (json.match(/\{/g) || []).length - (json.match(/\}/g) || []).length
+  json += ']'.repeat(Math.max(0, unclosedArrays)) + '}'.repeat(Math.max(0, unclosedObjects))
+
+  try { return JSON.parse(json) } catch (e) {
+    throw new Error(`JSON Parse error: ${e.message}`)
+  }
+}
+
 // ─── Pipeline utilities ───────────────────────────────────────────────────────
 
 async function searchPubMed(query, sinceDate) {
@@ -96,7 +119,7 @@ Respond ONLY with a JSON object:
 
   const payload = JSON.stringify({
     model: 'claude-sonnet-4-5',
-    max_tokens: 600,
+    max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: 'user', content: `Policy or Procedure: ${query}` }],
   })
@@ -104,9 +127,7 @@ Respond ONLY with a JSON object:
   const response = await fetchAnthropicAPI(payload, apiKey)
   const data = await response.json()
   const text = data.content?.[0]?.text || ''
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error('Could not identify policy from input')
-  return JSON.parse(jsonMatch[0])
+  return parseJSON(text, 'policy lookup')
 }
 
 // Stage 3 — full gap analysis using confirmed policy info + real literature
@@ -155,9 +176,7 @@ Select key_citations only from the PubMed studies listed above. Return the full 
   const response = await fetchAnthropicAPI(payload, apiKey)
   const data = await response.json()
   const text = data.content?.[0]?.text || ''
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error('No JSON found in model response')
-  return JSON.parse(jsonMatch[0])
+  return parseJSON(text, 'gap analysis')
 }
 
 // ─── Demo report (no API key required) ───────────────────────────────────────

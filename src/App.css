@@ -825,6 +825,78 @@
   margin: 0;
 }
 
+/* ─── Policy search label ────────────────────────────────────────────────── */
+
+.search-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* ─── Evidence Grid (side-by-side) ──────────────────────────────────────── */
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--border);
+}
+
+.evidence-col {
+  padding: 24px 32px;
+}
+
+.evidence-col + .evidence-col {
+  border-left: 1px solid var(--border);
+}
+
+/* ─── Metrics Row ────────────────────────────────────────────────────────── */
+
+.metrics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border-bottom: 1px solid var(--border);
+}
+
+.metric-card {
+  padding: 24px 32px;
+}
+
+.metric-card + .metric-card {
+  border-left: 1px solid var(--border);
+}
+
+.metric-label {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+
+.staleness-wrapper {
+  max-width: none;
+}
+
+/* ─── Citations Grid ─────────────────────────────────────────────────────── */
+
+.citations-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.citation-card {
+  background: #fafaf8;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {
@@ -846,5 +918,19 @@
   }
   .app-main {
     padding: 0 16px 40px;
+  }
+  .evidence-grid,
+  .metrics-row,
+  .citations-grid {
+    grid-template-columns: 1fr;
+  }
+  .evidence-col + .evidence-col,
+  .metric-card + .metric-card {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .evidence-col,
+  .metric-card {
+    padding: 20px;
   }
 }

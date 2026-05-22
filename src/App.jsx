@@ -43,7 +43,10 @@ async function searchPubMed(query, sinceDate) {
 
 async function runAnthropicPipeline(procedure, pubmedData, apiKey) {
   const systemPrompt = `You are a clinical policy analyst for a Utilization Management Committee compliance tool.
-Your task: analyze the evidence gap between a CMS coverage policy (NCD or LCD) and current peer-reviewed literature for a given procedure or diagnosis.
+Your task: analyze the evidence gap between a CMS coverage policy (NCD or LCD) and current peer-reviewed literature.
+
+If the input is a CMS policy ID (e.g. "NCD 20.32", "LCD L33822"), look up that specific policy directly.
+If the input is a procedure or diagnosis name, identify the most relevant governing NCD or LCD for it.
 
 Respond ONLY with a single valid JSON object matching this exact schema:
 {
@@ -69,7 +72,7 @@ Recommended action: maintain = score 0-25, reconsider = 26-50, escalate = 51-100
 
 Use your knowledge of CMS NCD/LCD policy history. If you are uncertain of the exact policy ID, provide the best available identifier (e.g., "NCD 20.4" or "LCD L33822").`
 
-  const userMessage = `Procedure/Diagnosis: ${procedure}
+  const userMessage = `CMS Policy or Procedure: ${procedure}
 
 PubMed literature found since estimated policy revision date:
 ${JSON.stringify(pubmedData, null, 2)}
@@ -261,6 +264,8 @@ function ReportCard({ report, isDemo, onAddKey }) {
   return (
     <div className="report-card">
       {isDemo && <DemoBanner onAddKey={onAddKey} />}
+
+      {/* Header */}
       <header className="report-header">
         <div className="report-header-top">
           <h2 className="report-procedure">{report.procedure}</h2>
@@ -275,27 +280,31 @@ function ReportCard({ report, isDemo, onAddKey }) {
         </div>
       </header>
 
-      <div className="report-sections">
+      {/* Summary */}
+      <section className="report-section">
+        <h3 className="section-title">Analysis Summary</h3>
+        <p className="section-body">{report.summary}</p>
+      </section>
 
-        {/* Policy Summary */}
-        <section className="report-section">
-          <h3 className="section-title">Policy Summary</h3>
-          <p className="section-body">{report.summary}</p>
-          {report.policy_evidence_basis?.length > 0 && (
+      {/* Side-by-side evidence */}
+      <div className="evidence-grid">
+        <div className="evidence-col">
+          <h3 className="section-title">Policy Evidence Basis</h3>
+          {report.policy_evidence_basis?.length > 0 ? (
             <ul className="evidence-list">
               {report.policy_evidence_basis.map((e, i) => (
                 <li key={i}>{e}</li>
               ))}
             </ul>
+          ) : (
+            <p className="section-body muted">No evidence basis recorded.</p>
           )}
-        </section>
-
-        {/* Evidence Since Revision */}
-        <section className="report-section">
-          <h3 className="section-title">Evidence Since Revision</h3>
+        </div>
+        <div className="evidence-col">
+          <h3 className="section-title">New Literature Since Revision</h3>
           {report.literature_since_revision?.studies?.length > 0 ? (
             <div className="studies-table">
-              {report.literature_since_revision.studies.slice(0, 8).map((s, i) => (
+              {report.literature_since_revision.studies.slice(0, 6).map((s, i) => (
                 <div key={i} className="study-row">
                   <a
                     href={`https://pubmed.ncbi.nlm.nih.gov/${s.pmid}/`}
@@ -316,61 +325,54 @@ function ReportCard({ report, isDemo, onAddKey }) {
           ) : (
             <p className="section-body muted">No indexed literature found since the policy revision date.</p>
           )}
-        </section>
-
-        {/* Gap Direction */}
-        <section className="report-section">
-          <h3 className="section-title">Gap Direction</h3>
-          <div className="gap-row">
-            <GapBadge direction={report.gap_direction} />
-          </div>
-        </section>
-
-        {/* Staleness Score */}
-        <section className="report-section">
-          <h3 className="section-title">Staleness Score</h3>
-          <StalenessMeter score={report.staleness_score} />
-        </section>
-
-        {/* Recommended Action */}
-        <section className="report-section">
-          <h3 className="section-title">Recommended Action</h3>
-          <div className="action-row">
-            <ActionBadge action={report.recommended_action} />
-            <p className="action-explanation">
-              {report.recommended_action === 'maintain' &&
-                'Current evidence is consistent with policy. No immediate review required.'}
-              {report.recommended_action === 'reconsider' &&
-                'Emerging evidence warrants scheduled policy review at next UM Committee cycle.'}
-              {report.recommended_action === 'escalate' &&
-                'Significant evidence divergence detected. Escalate for expedited UM Committee review.'}
-            </p>
-          </div>
-        </section>
-
-        {/* Key Citations */}
-        {report.key_citations?.length > 0 && (
-          <section className="report-section">
-            <h3 className="section-title">Key Citations</h3>
-            <div className="citations-list">
-              {report.key_citations.map((c, i) => (
-                <div key={i} className="citation-item">
-                  <a
-                    href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="citation-title"
-                  >
-                    {c.title}
-                  </a>
-                  <p className="citation-finding">{c.finding}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
+        </div>
       </div>
+
+      {/* Metrics row */}
+      <div className="metrics-row">
+        <div className="metric-card">
+          <div className="metric-label">Gap Direction</div>
+          <GapBadge direction={report.gap_direction} />
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Staleness Score</div>
+          <StalenessMeter score={report.staleness_score} />
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Recommended Action</div>
+          <ActionBadge action={report.recommended_action} />
+          <p className="action-explanation" style={{ marginTop: 10 }}>
+            {report.recommended_action === 'maintain' &&
+              'Current evidence is consistent with policy. No immediate review required.'}
+            {report.recommended_action === 'reconsider' &&
+              'Emerging evidence warrants scheduled policy review at next UM Committee cycle.'}
+            {report.recommended_action === 'escalate' &&
+              'Significant evidence divergence detected. Escalate for expedited UM Committee review.'}
+          </p>
+        </div>
+      </div>
+
+      {/* Key Citations grid */}
+      {report.key_citations?.length > 0 && (
+        <section className="report-section">
+          <h3 className="section-title">Key Citations</h3>
+          <div className="citations-grid">
+            {report.key_citations.map((c, i) => (
+              <div key={i} className="citation-card">
+                <a
+                  href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="citation-title"
+                >
+                  {c.title}
+                </a>
+                <p className="citation-finding">{c.finding}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <footer className="report-footer">
         <p>Generated by Coverage Evidence Match · For UM Committee use only · Not clinical advice</p>
@@ -489,11 +491,12 @@ export default function App() {
             </div>
 
             <form onSubmit={handleSubmit} className="search-form">
+              <label className="search-label">CMS Policy ID or Procedure</label>
               <div className="search-box">
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="e.g. TAVR, AF ablation, cardiac rehabilitation"
+                  placeholder="e.g. NCD 20.32, LCD L33822, or procedure name"
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   required
@@ -507,7 +510,12 @@ export default function App() {
 
             <div className="example-queries">
               <span className="example-label">Try:</span>
-              {['TAVR', 'AF ablation', 'Watchman device', 'Cardiac rehabilitation'].map(ex => (
+              {[
+                'NCD 20.32 (TAVR)',
+                'NCD 20.10.1 (Cardiac Rehab)',
+                'NCD 20.8.3 (Watchman)',
+                'LCD L33822 (AF Ablation)',
+              ].map(ex => (
                 <button
                   key={ex}
                   type="button"

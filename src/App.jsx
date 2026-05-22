@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import './App.css'
 
+// ─── Proxy URL ────────────────────────────────────────────────────────────────
+// Supports ?proxy=https://cem-proxy.YOURNAME.workers.dev in the page URL,
+// or a value stored in sessionStorage. When set, API calls are routed through
+// your Cloudflare Worker (fixes CORS; no API key exposed in browser headers).
+const URL_PROXY = new URLSearchParams(window.location.search).get('proxy') || ''
+
+function getProxyUrl() {
+  return URL_PROXY || sessionStorage.getItem('cem_proxy_url') || ''
+}
+
 // ─── Pipeline utilities ───────────────────────────────────────────────────────
 
 async function searchPubMed(query, sinceDate) {
@@ -65,21 +75,38 @@ ${JSON.stringify(pubmedData, null, 2)}
 
 Analyze this and return the structured JSON report.`
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-calls': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    }),
+  const proxyUrl = getProxyUrl()
+  const payload = JSON.stringify({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 1500,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
   })
+
+  let response
+  if (proxyUrl) {
+    // Route through Cloudflare Worker proxy (no CORS issues)
+    response = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+      },
+      body: payload,
+    })
+  } else {
+    // Direct browser call (requires Anthropic account in good standing)
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-calls': 'true',
+      },
+      body: payload,
+    })
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
@@ -363,6 +390,7 @@ export default function App() {
   const [report, setReport] = useState(null)
   const [isDemo, setIsDemo] = useState(false)
   const [error, setError] = useState('')
+  const [proxyInput, setProxyInput] = useState('')
 
   async function runPipeline(q, key) {
     setPhase('running')
@@ -527,6 +555,34 @@ export default function App() {
             </form>
             <div className="error-box">
               <strong>Error:</strong> {error}
+              {(error === 'Load failed' || error === 'Failed to fetch') && (
+                <p className="error-cors-hint">
+                  This is a browser CORS error — the Anthropic API can't be called
+                  directly from this browser. Fix: deploy the included Cloudflare Worker
+                  proxy (takes ~2 min) and paste its URL below.
+                </p>
+              )}
+              <div className="error-proxy-row">
+                <input
+                  type="url"
+                  className="error-proxy-input"
+                  placeholder="https://cem-proxy.YOURNAME.workers.dev  (optional)"
+                  value={proxyInput}
+                  onChange={e => setProxyInput(e.target.value)}
+                />
+                {proxyInput && (
+                  <button
+                    className="error-proxy-save"
+                    onClick={() => {
+                      sessionStorage.setItem('cem_proxy_url', proxyInput.trim())
+                      const key = sessionStorage.getItem('cem_api_key') || ''
+                      runPipeline(query, key)
+                    }}
+                  >
+                    Save &amp; retry →
+                  </button>
+                )}
+              </div>
               <div className="error-actions">
                 <button
                   className="error-demo-btn"

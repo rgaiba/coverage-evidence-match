@@ -5,7 +5,7 @@ import './App.css'
 // Supports ?proxy=https://cem-proxy.YOURNAME.workers.dev in the page URL,
 // or a value stored in sessionStorage. When set, API calls are routed through
 // your Cloudflare Worker (fixes CORS; no API key exposed in browser headers).
-const DEFAULT_PROXY = 'https://cem-proxy.rahul1234.workers.dev'
+const DEFAULT_PROXY = 'https://cem-proxy.rahulgaiba.workers.dev'
 const URL_PROXY = new URLSearchParams(window.location.search).get('proxy') || ''
 
 function getProxyUrl() {

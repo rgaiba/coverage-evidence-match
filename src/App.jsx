@@ -80,6 +80,11 @@ async function runPolicyLookup(query, apiKey) {
   const systemPrompt = `You are a CMS coverage policy expert for a Utilization Management Committee tool.
 Given a CMS policy ID (e.g. "NCD 20.32", "LCD L33822") or a procedure/device name, identify the governing NCD or LCD.
 
+For policy_evidence_basis, list the actual studies and trials the policy was based on.
+Where you know the PubMed ID, include it in parentheses: "(PMID: 12345678)".
+Format each item as: "Trial name Year (PMID: XXXXXXXX) — brief description of what it showed"
+If you do not know the PMID, omit the parenthetical entirely — do not guess PMIDs.
+
 Respond ONLY with a JSON object:
 {
   "procedure": string,
@@ -118,16 +123,18 @@ Respond ONLY with a single valid JSON object:
   "policy_evidence_basis": [string],
   "literature_since_revision": { "count": number, "studies": [{ "pmid": string, "title": string, "authors": string, "journal": string, "date": string }] },
   "gap_direction": "supports_expansion" | "supports_restriction" | "contradictory" | "neutral",
-  "staleness_score": number (0-100),
+  "staleness_score": number (0-100, sum of the three breakdown components),
+  "staleness_breakdown": {
+    "time_score": number (0-30, time since revision: +15 per 2 years without update, max 30),
+    "volume_score": number (0-25, new studies: >10=15, >5=10, >2=5, else 0),
+    "direction_score": number (0-45, directional consistency: strong contradiction=35-45, moderate=20-34, weak=5-19, neutral=0)
+  },
   "recommended_action": "maintain" | "reconsider" | "escalate",
   "summary": string,
   "key_citations": [{ "pmid": string, "title": string, "finding": string }]
 }
 
-Staleness score weighting:
-- Time since revision: 30% (every 2 years without update = 15 points)
-- Volume of new literature: 25% (>10 studies = 15 pts, >5 = 10 pts, >2 = 5 pts)
-- Directional consistency: 45% (strong contradictory evidence = high score)
+Staleness score = time_score + volume_score + direction_score.
 Recommended action: maintain = 0-25, reconsider = 26-50, escalate = 51-100`
 
   const userMessage = `Policy:
@@ -161,10 +168,10 @@ const DEMO_REPORT = {
   policy_id: 'NCD 20.32',
   last_revised: '2019-06-21',
   policy_evidence_basis: [
-    'PARTNER 1 trial (2011): TAVR non-inferior to SAVR in high-risk surgical patients',
-    'PARTNER 2 trial (2016): TAVR non-inferior to SAVR in intermediate-risk patients',
-    'CoreValve US Pivotal trial (2014): TAVR superior to SAVR in extreme-risk patients',
-    'FDA approval of SAPIEN 3 and CoreValve Evolut systems as evidence basis',
+    'PARTNER 1 trial 2011 (PMID: 21639811) — TAVR non-inferior to SAVR in high-risk surgical patients (all-cause mortality HR 0.93)',
+    'PARTNER 2 trial 2016 (PMID: 26886413) — TAVR non-inferior to SAVR in intermediate-risk patients',
+    'CoreValve US Pivotal Trial 2014 (PMID: 24678939) — TAVR superior to SAVR in extreme-risk patients (1-yr mortality 14.2% vs 19.1%)',
+    'FDA approval of SAPIEN 3 and CoreValve Evolut systems as co-evidence basis for NCD 20.32',
   ],
   literature_since_revision: {
     count: 47,
@@ -181,6 +188,7 @@ const DEMO_REPORT = {
   },
   gap_direction: 'supports_expansion',
   staleness_score: 62,
+  staleness_breakdown: { time_score: 22, volume_score: 15, direction_score: 25 },
   recommended_action: 'escalate',
   summary: 'NCD 20.32 (June 2019) established TAVR coverage criteria based on intermediate-to-high surgical risk classification. Since revision, substantial evidence supports TAVR expansion to low-risk patients (PARTNER 3, Evolut Low Risk), patients with bicuspid valves, and younger populations — cohorts currently not explicitly covered. Five-year durability data now available, and 47 indexed studies since 2019 collectively challenge the surgical-risk gating criteria that underpin current coverage determinations.',
   key_citations: [
@@ -223,7 +231,7 @@ function Spinner() {
   return <span className="spinner">⟳</span>
 }
 
-function StalenessMeter({ score }) {
+function StalenessMeter({ score, breakdown }) {
   const color =
     score <= 25 ? '#22c55e' :
     score <= 50 ? '#eab308' :
@@ -234,19 +242,61 @@ function StalenessMeter({ score }) {
     score <= 50 ? 'Monitor' :
     score <= 75 ? 'Stale' :
     'Critical'
+
+  const components = breakdown ? [
+    { name: 'Time since revision', score: breakdown.time_score, max: 30 },
+    { name: 'Literature volume',   score: breakdown.volume_score, max: 25 },
+    { name: 'Evidence direction',  score: breakdown.direction_score, max: 45 },
+  ] : null
+
   return (
     <div className="staleness-wrapper">
       <div className="staleness-bar-bg">
-        <div
-          className="staleness-bar-fill"
-          style={{ width: `${score}%`, background: color }}
-        />
+        <div className="staleness-bar-fill" style={{ width: `${score}%`, background: color }} />
       </div>
       <div className="staleness-meta">
         <span className="staleness-score" style={{ color }}>{score}/100</span>
         <span className="staleness-label" style={{ color }}>{label}</span>
       </div>
+      {components && (
+        <div className="staleness-breakdown">
+          {components.map(c => (
+            <div key={c.name} className="breakdown-row">
+              <span className="breakdown-name">{c.name}</span>
+              <div className="breakdown-bar-bg">
+                <div
+                  className="breakdown-bar-fill"
+                  style={{ width: `${Math.round((c.score / c.max) * 100)}%`, background: color }}
+                />
+              </div>
+              <span className="breakdown-pts" style={{ color }}>{c.score}/{c.max}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
+  )
+}
+
+// Renders a policy evidence item — parses out PMID if present and links it
+function EvidenceBasisItem({ text }) {
+  const pmidMatch = text.match(/\(PMID:\s*(\d+)\)/i)
+  const pmid = pmidMatch?.[1]
+  const cleanText = text.replace(/\s*\(PMID:\s*\d+\)/i, '').trim()
+  return (
+    <li className="evidence-basis-item">
+      <span>{cleanText}</span>
+      {pmid && (
+        <a
+          href={`https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="evidence-pmid-link"
+        >
+          PubMed ↗
+        </a>
+      )}
+    </li>
   )
 }
 
@@ -321,7 +371,7 @@ function ReportCard({ report, isDemo, onAddKey }) {
           {report.policy_evidence_basis?.length > 0 ? (
             <ul className="evidence-list">
               {report.policy_evidence_basis.map((e, i) => (
-                <li key={i}>{e}</li>
+                <EvidenceBasisItem key={i} text={e} />
               ))}
             </ul>
           ) : (
@@ -364,7 +414,7 @@ function ReportCard({ report, isDemo, onAddKey }) {
         </div>
         <div className="metric-card">
           <div className="metric-label">Staleness Score</div>
-          <StalenessMeter score={report.staleness_score} />
+          <StalenessMeter score={report.staleness_score} breakdown={report.staleness_breakdown} />
         </div>
         <div className="metric-card">
           <div className="metric-label">Recommended Action</div>

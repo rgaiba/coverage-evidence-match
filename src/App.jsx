@@ -5,10 +5,11 @@ import './App.css'
 // Supports ?proxy=https://cem-proxy.YOURNAME.workers.dev in the page URL,
 // or a value stored in sessionStorage. When set, API calls are routed through
 // your Cloudflare Worker (fixes CORS; no API key exposed in browser headers).
+const DEFAULT_PROXY = 'https://cem-proxy.rahul1234.workers.dev'
 const URL_PROXY = new URLSearchParams(window.location.search).get('proxy') || ''
 
 function getProxyUrl() {
-  return URL_PROXY || sessionStorage.getItem('cem_proxy_url') || ''
+  return URL_PROXY || sessionStorage.getItem('cem_proxy_url') || DEFAULT_PROXY
 }
 
 // ─── Pipeline utilities ───────────────────────────────────────────────────────
@@ -390,7 +391,7 @@ export default function App() {
   const [report, setReport] = useState(null)
   const [isDemo, setIsDemo] = useState(false)
   const [error, setError] = useState('')
-  const [proxyInput, setProxyInput] = useState('')
+  const [proxyInput, setProxyInput] = useState(DEFAULT_PROXY)
 
   async function runPipeline(q, key) {
     setPhase('running')

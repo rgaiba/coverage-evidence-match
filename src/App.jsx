@@ -308,47 +308,27 @@ function ReportCard({ report }) {
 export default function App() {
   const [query, setQuery] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [showKeyInput, setShowKeyInput] = useState(false)
+  const [showKeyModal, setShowKeyModal] = useState(false)
+  const [pendingQuery, setPendingQuery] = useState('')
   const [phase, setPhase] = useState('idle') // idle | running | done | error
   const [activeStep, setActiveStep] = useState(-1)
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    const key = apiKey.trim() || sessionStorage.getItem('cem_api_key') || ''
-    if (!key) {
-      setShowKeyInput(true)
-      return
-    }
-    if (apiKey.trim()) sessionStorage.setItem('cem_api_key', apiKey.trim())
-
+  async function runPipeline(q, key) {
     setPhase('running')
     setReport(null)
     setError('')
-
     try {
-      // Step 0 — CMS (handled by Anthropic with knowledge)
       setActiveStep(0)
       await new Promise(r => setTimeout(r, 600))
-
-      // Step 1 — PubMed
       setActiveStep(1)
-      const pubmedData = await searchPubMed(query, null)
-
-      // Step 2 — Consensus synthesis (handled by Anthropic)
+      const pubmedData = await searchPubMed(q, null)
       setActiveStep(2)
       await new Promise(r => setTimeout(r, 400))
-
-      // Step 3 — Anthropic
       setActiveStep(3)
-      const result = await runAnthropicPipeline(query, pubmedData, key)
-
-      // Merge actual PubMed results into report
-      if (pubmedData.studies.length > 0) {
-        result.literature_since_revision = pubmedData
-      }
-
+      const result = await runAnthropicPipeline(q, pubmedData, key)
+      if (pubmedData.studies.length > 0) result.literature_since_revision = pubmedData
       setReport(result)
       setPhase('done')
       setActiveStep(-1)
@@ -359,23 +339,61 @@ export default function App() {
     }
   }
 
+  async function handleSubmit(e) {
+    e.preventDefault()
+    const key = sessionStorage.getItem('cem_api_key') || ''
+    if (!key) {
+      setPendingQuery(query)
+      setShowKeyModal(true)
+      return
+    }
+    runPipeline(query, key)
+  }
+
+  function handleKeySubmit(e) {
+    e.preventDefault()
+    const key = apiKey.trim()
+    if (!key) return
+    sessionStorage.setItem('cem_api_key', key)
+    setShowKeyModal(false)
+    setApiKey('')
+    runPipeline(pendingQuery, key)
+  }
+
   return (
     <div className="app">
+      {showKeyModal && (
+        <div className="key-modal-overlay">
+          <form className="key-modal" onSubmit={handleKeySubmit}>
+            <h2 className="key-modal-title">Enter API Key</h2>
+            <p className="key-modal-desc">
+              Coverage Evidence Match uses the Anthropic API to generate gap analyses.
+              Enter your API key once — it's stored in your browser session only.
+            </p>
+            <input
+              type="password"
+              className="key-input"
+              placeholder="sk-ant-..."
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              autoFocus
+              required
+            />
+            <p className="key-hint">Never sent to any server other than api.anthropic.com.</p>
+            <div className="key-modal-actions">
+              <button type="button" className="key-cancel" onClick={() => setShowKeyModal(false)}>Cancel</button>
+              <button type="submit" className="search-btn">Continue →</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <header className="app-header">
         <div className="header-inner">
           <div className="wordmark">
             <span className="wordmark-main">Coverage Evidence Match</span>
             <span className="wordmark-sub">UM Committee Compliance Tool</span>
           </div>
-          <nav className="header-nav">
-            <button
-              className="nav-link"
-              onClick={() => setShowKeyInput(v => !v)}
-              type="button"
-            >
-              {showKeyInput ? 'Hide' : 'API Key'}
-            </button>
-          </nav>
         </div>
       </header>
 
@@ -406,18 +424,6 @@ export default function App() {
                   Analyze →
                 </button>
               </div>
-              {showKeyInput && (
-                <div className="key-row">
-                  <input
-                    type="password"
-                    className="key-input"
-                    placeholder="Anthropic API key (sk-ant-...)"
-                    value={apiKey}
-                    onChange={e => setApiKey(e.target.value)}
-                  />
-                  <p className="key-hint">Stored in session only. Never sent to any server other than api.anthropic.com.</p>
-                </div>
-              )}
             </form>
 
             <div className="example-queries">

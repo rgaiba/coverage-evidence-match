@@ -93,6 +93,43 @@ Analyze this and return the structured JSON report.`
   return JSON.parse(jsonMatch[0])
 }
 
+// ─── Demo report (no API key required) ───────────────────────────────────────
+
+const DEMO_REPORT = {
+  procedure: 'Transcatheter Aortic Valve Replacement (TAVR)',
+  policy_type: 'NCD',
+  policy_id: 'NCD 20.32',
+  last_revised: '2019-06-21',
+  policy_evidence_basis: [
+    'PARTNER 1 trial (2011): TAVR non-inferior to SAVR in high-risk surgical patients',
+    'PARTNER 2 trial (2016): TAVR non-inferior to SAVR in intermediate-risk patients',
+    'CoreValve US Pivotal trial (2014): TAVR superior to SAVR in extreme-risk patients',
+    'FDA approval of SAPIEN 3 and CoreValve Evolut systems as evidence basis',
+  ],
+  literature_since_revision: {
+    count: 47,
+    studies: [
+      { pmid: '37321234', title: 'Five-year outcomes of TAVR vs. SAVR in low-risk patients: PARTNER 3 extended follow-up', authors: 'Mack MJ, Leon MB, Thourani VH', journal: 'N Engl J Med', date: '2024 Mar' },
+      { pmid: '37198876', title: 'Transcatheter aortic valve replacement in bicuspid aortic valve stenosis: a systematic review', authors: 'Yoon SH, Bleiziffer S, De Backer O', journal: 'J Am Coll Cardiol', date: '2024 Jan' },
+      { pmid: '36954321', title: 'Leaflet thrombosis after TAVR: incidence, outcomes, and anticoagulation strategies', authors: 'Chakravarty T, Søndergaard L, Friedman J', journal: 'Circulation', date: '2023 Nov' },
+      { pmid: '36812345', title: 'Cerebrovascular outcomes after TAVR with cerebral embolic protection: PROTECTED TAVR trial', authors: 'Kapadia SR, Makkar R, Leon M', journal: 'N Engl J Med', date: '2023 Aug' },
+      { pmid: '36701234', title: 'Sex-based differences in TAVR outcomes: analysis of 90,000 procedures in the STS/ACC TVT Registry', authors: 'Nitsche C, Koschutnik M, Kammerlander A', journal: 'JAMA Cardiol', date: '2023 Jun' },
+      { pmid: '36589012', title: 'Conduction disturbances and pacemaker implantation after TAVR: updated meta-analysis', authors: '열 열열 열열', journal: 'Eur Heart J', date: '2023 Apr' },
+      { pmid: '36478901', title: 'TAVR durability at 10 years: structural valve deterioration in the FRANCE-2 registry', authors: 'Eltchaninoff H, Durand E, Avinée G', journal: 'Lancet', date: '2023 Feb' },
+      { pmid: '36367890', title: 'Cost-effectiveness of TAVR in low-surgical-risk patients: long-term economic analysis', authors: 'Baron SJ, Wang K, House JA', journal: 'J Am Coll Cardiol', date: '2023 Jan' },
+    ],
+  },
+  gap_direction: 'supports_expansion',
+  staleness_score: 62,
+  recommended_action: 'escalate',
+  summary: 'NCD 20.32 (June 2019) established TAVR coverage criteria based on intermediate-to-high surgical risk classification. Since revision, substantial evidence supports TAVR expansion to low-risk patients (PARTNER 3, Evolut Low Risk), patients with bicuspid valves, and younger populations — cohorts currently not explicitly covered. Five-year durability data now available, and 47 indexed studies since 2019 collectively challenge the surgical-risk gating criteria that underpin current coverage determinations.',
+  key_citations: [
+    { pmid: '37321234', title: 'Five-year outcomes of TAVR vs. SAVR in low-risk patients: PARTNER 3', finding: 'TAVR demonstrated superiority over SAVR at 5 years in low-risk patients (death/stroke/rehospitalization composite: 31.3% vs. 38.5%), directly challenging the intermediate-risk threshold in NCD 20.32.' },
+    { pmid: '37198876', title: 'TAVR in bicuspid aortic valve stenosis: systematic review', finding: 'Pooled outcomes for bicuspid TAVR (n=4,500) showed 30-day mortality of 1.1% and stroke 2.0%, comparable to tricuspid valve outcomes — supporting extension of NCD coverage to bicuspid anatomy.' },
+    { pmid: '36812345', title: 'PROTECTED TAVR trial: cerebral embolic protection', finding: 'Cerebral embolic protection did not reduce stroke at 72 hours (2.3% vs. 2.9%, p=0.30), informing procedural coverage criteria for adjunctive devices.' },
+  ],
+}
+
 // ─── Pipeline step labels ─────────────────────────────────────────────────────
 
 const STEPS = [
@@ -182,9 +219,20 @@ function GapBadge({ direction }) {
   return <span className="gap-badge" style={{ color: m.color, borderColor: m.color + '44' }}>{m.label}</span>
 }
 
-function ReportCard({ report }) {
+function DemoBanner({ onAddKey }) {
+  return (
+    <div className="demo-banner">
+      <span className="demo-banner-label">Demo mode</span>
+      <span className="demo-banner-text">This is sample data for TAVR (NCD 20.32). For a live analysis of any procedure,</span>
+      <button className="demo-banner-link" onClick={onAddKey}>add your Anthropic API key →</button>
+    </div>
+  )
+}
+
+function ReportCard({ report, isDemo, onAddKey }) {
   return (
     <div className="report-card">
+      {isDemo && <DemoBanner onAddKey={onAddKey} />}
       <header className="report-header">
         <div className="report-header-top">
           <h2 className="report-procedure">{report.procedure}</h2>
@@ -313,22 +361,29 @@ export default function App() {
   const [phase, setPhase] = useState('idle') // idle | running | done | error
   const [activeStep, setActiveStep] = useState(-1)
   const [report, setReport] = useState(null)
+  const [isDemo, setIsDemo] = useState(false)
   const [error, setError] = useState('')
 
   async function runPipeline(q, key) {
     setPhase('running')
     setReport(null)
     setError('')
+    const demo = !key
+    setIsDemo(demo)
     try {
       setActiveStep(0)
-      await new Promise(r => setTimeout(r, 600))
+      await new Promise(r => setTimeout(r, 700))
       setActiveStep(1)
-      const pubmedData = await searchPubMed(q, null)
+      await new Promise(r => setTimeout(r, demo ? 900 : 0))
+      const pubmedData = demo ? DEMO_REPORT.literature_since_revision : await searchPubMed(q, null)
       setActiveStep(2)
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 600))
       setActiveStep(3)
-      const result = await runAnthropicPipeline(q, pubmedData, key)
-      if (pubmedData.studies.length > 0) result.literature_since_revision = pubmedData
+      await new Promise(r => setTimeout(r, demo ? 800 : 0))
+      const result = demo
+        ? { ...DEMO_REPORT, procedure: q || DEMO_REPORT.procedure }
+        : await runAnthropicPipeline(q, pubmedData, key)
+      if (!demo && pubmedData.studies.length > 0) result.literature_since_revision = pubmedData
       setReport(result)
       setPhase('done')
       setActiveStep(-1)
@@ -342,11 +397,6 @@ export default function App() {
   async function handleSubmit(e) {
     e.preventDefault()
     const key = sessionStorage.getItem('cem_api_key') || ''
-    if (!key) {
-      setPendingQuery(query)
-      setShowKeyModal(true)
-      return
-    }
     runPipeline(query, key)
   }
 
@@ -498,7 +548,11 @@ export default function App() {
                 <button type="submit" className="search-btn">Analyze →</button>
               </div>
             </form>
-            <ReportCard report={report} />
+            <ReportCard
+              report={report}
+              isDemo={isDemo}
+              onAddKey={() => { setPendingQuery(query); setShowKeyModal(true) }}
+            />
           </div>
         )}
       </main>

@@ -15,7 +15,12 @@ function getProxyUrl() {
 // ─── Pipeline utilities ───────────────────────────────────────────────────────
 
 async function searchPubMed(query, sinceDate) {
-  const dateFilter = sinceDate ? `+AND+("${sinceDate}"[Date - Publication] : "3000"[Date - Publication])` : ''
+  // Build date filter from policy revision year
+  let dateFilter = ''
+  if (sinceDate) {
+    const year = String(sinceDate).substring(0, 4)
+    dateFilter = `+AND+("${year}"[Date - Publication] : "3000"[Date - Publication])`
+  }
   const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}${dateFilter}&retmax=20&retmode=json&sort=date`
   const searchRes = await fetch(searchUrl)
   const searchData = await searchRes.json()
@@ -38,68 +43,20 @@ async function searchPubMed(query, sinceDate) {
     }
   }).filter(s => s.title)
 
-  return { count: searchData.esearchresult?.count || studies.length, studies }
+  return { count: Number(searchData.esearchresult?.count) || studies.length, studies }
 }
 
-async function runAnthropicPipeline(procedure, pubmedData, apiKey) {
-  const systemPrompt = `You are a clinical policy analyst for a Utilization Management Committee compliance tool.
-Your task: analyze the evidence gap between a CMS coverage policy (NCD or LCD) and current peer-reviewed literature.
-
-If the input is a CMS policy ID (e.g. "NCD 20.32", "LCD L33822"), look up that specific policy directly.
-If the input is a procedure or diagnosis name, identify the most relevant governing NCD or LCD for it.
-
-Respond ONLY with a single valid JSON object matching this exact schema:
-{
-  "procedure": string,
-  "policy_type": "NCD" | "LCD",
-  "policy_id": string,
-  "last_revised": string (YYYY-MM-DD or YYYY),
-  "policy_evidence_basis": [string],
-  "literature_since_revision": { "count": number, "studies": [{ "pmid": string, "title": string, "authors": string, "journal": string, "date": string }] },
-  "gap_direction": "supports_expansion" | "supports_restriction" | "contradictory" | "neutral",
-  "staleness_score": number (0-100),
-  "recommended_action": "maintain" | "reconsider" | "escalate",
-  "summary": string (2-3 sentence plain-English summary for UM committee),
-  "key_citations": [{ "pmid": string, "title": string, "finding": string }]
-}
-
-Staleness score weighting:
-- Time since revision: 30% (every 2 years without update = 15 points)
-- Volume of new literature: 25% (>10 new studies = 15 points, >5 = 10 points, >2 = 5 points)
-- Directional consistency: 45% (strong contradictory evidence = high score)
-
-Recommended action: maintain = score 0-25, reconsider = 26-50, escalate = 51-100
-
-Use your knowledge of CMS NCD/LCD policy history. If you are uncertain of the exact policy ID, provide the best available identifier (e.g., "NCD 20.4" or "LCD L33822").`
-
-  const userMessage = `CMS Policy or Procedure: ${procedure}
-
-PubMed literature found since estimated policy revision date:
-${JSON.stringify(pubmedData, null, 2)}
-
-Analyze this and return the structured JSON report.`
-
+// Shared fetch helper for Anthropic API (direct or via proxy)
+async function fetchAnthropicAPI(payload, apiKey) {
   const proxyUrl = getProxyUrl()
-  const payload = JSON.stringify({
-    model: 'claude-sonnet-4-5',
-    max_tokens: 1500,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userMessage }],
-  })
-
   let response
   if (proxyUrl) {
-    // Route through Cloudflare Worker proxy (no CORS issues)
     response = await fetch(proxyUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-      },
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: payload,
     })
   } else {
-    // Direct browser call (requires Anthropic account in good standing)
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -111,12 +68,84 @@ Analyze this and return the structured JSON report.`
       body: payload,
     })
   }
-
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
     throw new Error(err.error?.message || `API error ${response.status}`)
   }
+  return response
+}
 
+// Stage 1 — identify the CMS policy, clean procedure name, and revision date
+async function runPolicyLookup(query, apiKey) {
+  const systemPrompt = `You are a CMS coverage policy expert for a Utilization Management Committee tool.
+Given a CMS policy ID (e.g. "NCD 20.32", "LCD L33822") or a procedure/device name, identify the governing NCD or LCD.
+
+Respond ONLY with a JSON object:
+{
+  "procedure": string,
+  "policy_type": "NCD" | "LCD",
+  "policy_id": string,
+  "last_revised": string,
+  "policy_evidence_basis": [string]
+}`
+
+  const payload = JSON.stringify({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 600,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `Policy or Procedure: ${query}` }],
+  })
+
+  const response = await fetchAnthropicAPI(payload, apiKey)
+  const data = await response.json()
+  const text = data.content?.[0]?.text || ''
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('Could not identify policy from input')
+  return JSON.parse(jsonMatch[0])
+}
+
+// Stage 3 — full gap analysis using confirmed policy info + real literature
+async function runGapAnalysis(policyInfo, pubmedData, apiKey) {
+  const systemPrompt = `You are a clinical policy analyst for a Utilization Management Committee compliance tool.
+Analyze the evidence gap between the CMS coverage policy provided and the current peer-reviewed literature.
+
+Respond ONLY with a single valid JSON object:
+{
+  "procedure": string,
+  "policy_type": "NCD" | "LCD",
+  "policy_id": string,
+  "last_revised": string,
+  "policy_evidence_basis": [string],
+  "literature_since_revision": { "count": number, "studies": [{ "pmid": string, "title": string, "authors": string, "journal": string, "date": string }] },
+  "gap_direction": "supports_expansion" | "supports_restriction" | "contradictory" | "neutral",
+  "staleness_score": number (0-100),
+  "recommended_action": "maintain" | "reconsider" | "escalate",
+  "summary": string,
+  "key_citations": [{ "pmid": string, "title": string, "finding": string }]
+}
+
+Staleness score weighting:
+- Time since revision: 30% (every 2 years without update = 15 points)
+- Volume of new literature: 25% (>10 studies = 15 pts, >5 = 10 pts, >2 = 5 pts)
+- Directional consistency: 45% (strong contradictory evidence = high score)
+Recommended action: maintain = 0-25, reconsider = 26-50, escalate = 51-100`
+
+  const userMessage = `Policy:
+${JSON.stringify(policyInfo, null, 2)}
+
+PubMed literature since policy revision (${policyInfo.last_revised}):
+${JSON.stringify(pubmedData, null, 2)}
+
+Select key_citations only from the PubMed studies listed above. Return the full gap analysis JSON.`
+
+  const payload = JSON.stringify({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 1500,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+  })
+
+  const response = await fetchAnthropicAPI(payload, apiKey)
   const data = await response.json()
   const text = data.content?.[0]?.text || ''
   const jsonMatch = text.match(/\{[\s\S]*\}/)
@@ -164,10 +193,9 @@ const DEMO_REPORT = {
 // ─── Pipeline step labels ─────────────────────────────────────────────────────
 
 const STEPS = [
-  { id: 'cms',       label: 'CMS Coverage',  sub: 'Retrieving NCD/LCD policy' },
-  { id: 'pubmed',    label: 'PubMed',        sub: 'Searching literature since revision' },
-  { id: 'consensus', label: 'Consensus',     sub: 'Synthesizing evidence' },
-  { id: 'anthropic', label: 'Claude',        sub: 'Generating gap analysis' },
+  { id: 'policy',   label: 'Policy Lookup', sub: 'Identifying CMS NCD/LCD' },
+  { id: 'pubmed',   label: 'PubMed',        sub: 'Searching literature since revision' },
+  { id: 'analysis', label: 'Gap Analysis',  sub: 'Generating committee report' },
 ]
 
 // ─── UI components ────────────────────────────────────────────────────────────
@@ -402,19 +430,33 @@ export default function App() {
     const demo = !key
     setIsDemo(demo)
     try {
+      if (demo) {
+        // Demo flow — simulated delays
+        setActiveStep(0)
+        await new Promise(r => setTimeout(r, 700))
+        setActiveStep(1)
+        await new Promise(r => setTimeout(r, 900))
+        setActiveStep(2)
+        await new Promise(r => setTimeout(r, 800))
+        setReport({ ...DEMO_REPORT, procedure: q || DEMO_REPORT.procedure })
+        setPhase('done')
+        setActiveStep(-1)
+        return
+      }
+
+      // Stage 1 — identify the policy and get clean procedure name + revision date
       setActiveStep(0)
-      await new Promise(r => setTimeout(r, 700))
+      const policyInfo = await runPolicyLookup(q, key)
+
+      // Stage 2 — PubMed search using AI-identified procedure name and revision date
       setActiveStep(1)
-      await new Promise(r => setTimeout(r, demo ? 900 : 0))
-      const pubmedData = demo ? DEMO_REPORT.literature_since_revision : await searchPubMed(q, null)
+      const pubmedData = await searchPubMed(policyInfo.procedure, policyInfo.last_revised)
+
+      // Stage 3 — full gap analysis with real literature
       setActiveStep(2)
-      await new Promise(r => setTimeout(r, 600))
-      setActiveStep(3)
-      await new Promise(r => setTimeout(r, demo ? 800 : 0))
-      const result = demo
-        ? { ...DEMO_REPORT, procedure: q || DEMO_REPORT.procedure }
-        : await runAnthropicPipeline(q, pubmedData, key)
-      if (!demo && pubmedData.studies.length > 0) result.literature_since_revision = pubmedData
+      const result = await runGapAnalysis(policyInfo, pubmedData, key)
+      result.literature_since_revision = pubmedData   // override with real PubMed data
+
       setReport(result)
       setPhase('done')
       setActiveStep(-1)
